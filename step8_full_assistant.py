@@ -15,19 +15,6 @@ from pydantic import BaseModel, Field
 load_dotenv()
 
 
-# ---------------------------------------------------------------------------
-# PART 1: THE EXPANDED "RULE BOOK"
-# ---------------------------------------------------------------------------
-# 14 topics -- covering the questions real travelers most commonly ask.
-#
-# UPDATED: "baggage" is now REAL, sourced data from IndiGo (India's
-# largest airline by market share) -- pulled from their actual public
-# policy pages (goindigo.in), paraphrased in our own words, current as
-# of 2026. Each entry is now (topic, text, source_url) so the "for more
-# details" link can point to a REAL page, not a placeholder, once
-# sourced. Topics not yet updated still use SkyPath's placeholder URL --
-# clearly marked below -- as the next ones to source for real.
-# ---------------------------------------------------------------------------
 POLICY_DOCS = [
     ("baggage", """
 Real IndiGo policy (India's largest domestic airline): cabin/hand baggage
@@ -149,14 +136,7 @@ ticket must be purchased instead.
 ]
 
 
-# ---------------------------------------------------------------------------
-# Fallback / default policy page link, used for any topic that doesn't
-# have its own real source_url yet (see None values above).
-# NOTE (for you, the developer -- never shown to users): this domain is
-# NOT real. Topics without a real source_url still point here as a
-# placeholder until they're sourced from a real airline the same way
-# "baggage" now is.
-# ---------------------------------------------------------------------------
+
 BASE_POLICY_URL = "https://www.skypathair.com/policies"
 
 
@@ -168,9 +148,9 @@ def policy_page_link(topic: str, source_url: str | None) -> str:
     return f"{BASE_POLICY_URL}#{topic}"
 
 
-# ---------------------------------------------------------------------------
-# PART 2 + 3: CHUNK + EMBED + STORE (same pattern as Step 6).
-# ---------------------------------------------------------------------------
+
+# PART 2 + 3: CHUNK + EMBED + STORE
+
 raw_documents = [
     Document(page_content=text, metadata={"topic": topic, "source_url": source_url})
     for topic, text, source_url in POLICY_DOCS
@@ -190,10 +170,8 @@ retriever = vectorstore.as_retriever(search_kwargs={"k": 4})
 print(">>> Search index ready.\n")
 
 
-# ---------------------------------------------------------------------------
-# PART 4: THE POLICY TOOL (RAG), with the same code-level "once per
-# question" hard block we added in Step 6.
-# ---------------------------------------------------------------------------
+
+# PART 4: THE POLICY TOOL (RAG), with the same code-level
 _already_searched_policy: dict[str, bool] = {}
 
 
@@ -219,17 +197,12 @@ def search_airline_policies(question: str) -> str:
 
     results = retriever.invoke(question)
     if not results:
-        # Nothing relevant found at all -- give the general policies page
-        # link so the user has somewhere real to check, instead of a
-        # dead end.
         return (
             "No relevant policy information found in our documents. "
             f"You can check our full policies page here: {BASE_POLICY_URL}"
         )
 
-    # Build the answer text, and ALSO attach a direct link for each
-    # specific topic that was matched, so the user can read the full
-    # official page instead of just trusting a short summary.
+   
     parts = []
     for doc in results:
         topic = doc.metadata.get("topic")
@@ -242,26 +215,15 @@ def search_airline_policies(question: str) -> str:
     return "\n\n".join(parts)
 
 
-# ---------------------------------------------------------------------------
+
 # PART 5: THE FLIGHT SEARCH TOOL, with a REAL/MOCK switch.
-#
-# USE_REAL_FLIGHT_DATA:
-#   False (default) -> instant, free, unlimited mock data. Use this for
-#       all everyday development/testing of the agent, RAG, memory, etc.
-#       This is standard practice -- real engineering teams don't hit a
-#       live rate-limited API on every single test run.
-#   True -> calls the REAL flight search API (RapidAPI's Sky Scrapper,
-#       confirmed working across 5 continents in earlier testing). Only
-#       flip this on for a deliberate, occasional real-data demo, since
-#       the free tier has a limited monthly quota (~100 requests) we
-#       already hit once.
-# ---------------------------------------------------------------------------
-USE_REAL_FLIGHT_DATA = True
+
+USE_REAL_FLIGHT_DATA = False
 
 USD_TO_INR_RATE = 87.0
 _already_searched_flights: dict[str, bool] = {}
 
-# --- Real API setup (only used if USE_REAL_FLIGHT_DATA = True) -------------
+# Real API setup (only used if USE_REAL_FLIGHT_DATA = True)
 RAPIDAPI_KEY = os.environ.get("RAPIDAPI_KEY", "")
 RAPIDAPI_HOST = "sky-scrapper.p.rapidapi.com"
 RAPIDAPI_HEADERS = {"X-RapidAPI-Key": RAPIDAPI_KEY, "X-RapidAPI-Host": RAPIDAPI_HOST}
@@ -406,9 +368,8 @@ def search_flights(origin_city: str, destination_city: str, date: str) -> list[d
 all_tools = [search_flights, search_airline_policies]
 
 
-# ---------------------------------------------------------------------------
+
 # PART 6: BUILD THE FULL AGENT -- model + both tools + memory.
-# ---------------------------------------------------------------------------
 chat_model = ChatGroq(model="llama-3.3-70b-versatile", temperature=0.2)
 checkpointer = InMemorySaver()
 
@@ -460,13 +421,6 @@ def ask(question: str, thread_id: str = "user-1") -> str:
 
     config = {"configurable": {"thread_id": thread_id}, "recursion_limit": 8}
 
-    # RELIABILITY: any call to an external API (the LLM) can occasionally
-    # fail for reasons outside our control -- e.g. the model generating a
-    # malformed/incomplete tool call, a network hiccup, a rate limit, etc.
-    # We try once, and if it fails, try ONE more time (a fresh attempt
-    # often succeeds, since these are usually one-off generation glitches,
-    # not a permanent problem). If it fails twice, we return a clear,
-    # honest message instead of crashing the whole program.
     last_error = None
     for attempt in range(2):
         try:
@@ -483,18 +437,7 @@ def ask(question: str, thread_id: str = "user-1") -> str:
             f"Please try rephrasing your question. (internal error: {last_error})")
 
 
-# ---------------------------------------------------------------------------
-# INTERACTIVE CHAT LOOP.
-# Type anything -- any city, any route, any policy question. The agent
-# is not restricted to any fixed list of test questions; everything you
-# type gets sent through the same real reasoning/tool-calling pipeline
-# we've built and tested all along.
-#
-# The SAME thread_id is used for your whole session here, so the agent
-# remembers earlier turns (e.g. "book the cheaper one" after a search) --
-# exactly like Step 5's memory test, just now with live typed input
-# instead of pre-written questions.
-# ---------------------------------------------------------------------------
+
 if __name__ == "__main__":
     session_thread_id = "cli-session-1"
     print("Skypath is ready. Ask about any flight (any cities, any date) or "
