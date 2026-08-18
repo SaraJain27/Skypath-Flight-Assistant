@@ -2,7 +2,7 @@
 import os
 import requests
 from dotenv import load_dotenv
-from langchain_groq import ChatGroq
+from langchain_openai import ChatOpenAI
 from langchain_core.tools import tool
 from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -13,7 +13,6 @@ from langgraph.checkpoint.memory import InMemorySaver
 from pydantic import BaseModel, Field
 
 load_dotenv()
-
 
 POLICY_DOCS = [
     ("baggage", """
@@ -135,8 +134,6 @@ ticket must be purchased instead.
 """, None),
 ]
 
-
-
 BASE_POLICY_URL = "https://www.skypathair.com/policies"
 
 
@@ -149,7 +146,7 @@ def policy_page_link(topic: str, source_url: str | None) -> str:
 
 
 
-# PART 2 + 3: CHUNK + EMBED + STORE
+# PART 2 + 3: CHUNK + EMBED + STORE 
 
 raw_documents = [
     Document(page_content=text, metadata={"topic": topic, "source_url": source_url})
@@ -171,7 +168,8 @@ print(">>> Search index ready.\n")
 
 
 
-# PART 4: THE POLICY TOOL (RAG), with the same code-level
+# PART 4: THE POLICY TOOL (RAG)
+
 _already_searched_policy: dict[str, bool] = {}
 
 
@@ -197,12 +195,14 @@ def search_airline_policies(question: str) -> str:
 
     results = retriever.invoke(question)
     if not results:
+        # Nothing relevant found at all -- give the general policies page
+        # link so the user has somewhere real to check, instead of a
+        # dead end.
         return (
             "No relevant policy information found in our documents. "
             f"You can check our full policies page here: {BASE_POLICY_URL}"
         )
 
-   
     parts = []
     for doc in results:
         topic = doc.metadata.get("topic")
@@ -217,13 +217,45 @@ def search_airline_policies(question: str) -> str:
 
 
 # PART 5: THE FLIGHT SEARCH TOOL, with a REAL/MOCK switch.
+#
+# USE_REAL_FLIGHT_DATA:
+#   False (default) -> instant, free, unlimited mock data. Use this for
+#       all everyday development/testing of the agent, RAG, memory, etc.
+#       This is standard practice -- real engineering teams don't hit a
+#       live rate-limited API on every single test run.
+#   True -> calls the REAL flight search API (RapidAPI's Sky Scrapper,
+#       confirmed working across 5 continents in earlier testing). Only
+#       flip this on for a deliberate, occasional real-data demo, since
+#       the free tier has a limited monthly quota (~100 requests) we
+#       already hit once.
 
-USE_REAL_FLIGHT_DATA = False
 
-USD_TO_INR_RATE = 87.0
+def get_usd_to_inr_rate():
+    """Fetch live USD to INR rate with a fallback."""
+    try:
+        response = requests.get(
+            "https://open.er-api.com/v6/latest/USD",
+            timeout=5
+        )
+        data = response.json()
+
+        if data.get("result") == "success":
+            return data["rates"]["INR"]
+
+    except Exception:
+        pass
+
+    # Fallback if API is unavailable
+    return 87.0
+
+
+
+USE_REAL_FLIGHT_DATA = True
+
+USD_TO_INR_RATE = get_usd_to_inr_rate()
 _already_searched_flights: dict[str, bool] = {}
 
-# Real API setup (only used if USE_REAL_FLIGHT_DATA = True)
+# --- Real API setup (only used if USE_REAL_FLIGHT_DATA = True) -------------
 RAPIDAPI_KEY = os.environ.get("RAPIDAPI_KEY", "")
 RAPIDAPI_HOST = "sky-scrapper.p.rapidapi.com"
 RAPIDAPI_HEADERS = {"X-RapidAPI-Key": RAPIDAPI_KEY, "X-RapidAPI-Host": RAPIDAPI_HOST}
@@ -370,7 +402,11 @@ all_tools = [search_flights, search_airline_policies]
 
 
 # PART 6: BUILD THE FULL AGENT -- model + both tools + memory.
-chat_model = ChatGroq(model="llama-3.3-70b-versatile", temperature=0.2)
+
+chat_model = ChatOpenAI(
+    model="gpt-5.5",
+    temperature=0.2
+)
 checkpointer = InMemorySaver()
 
 agent = create_agent(
@@ -421,6 +457,13 @@ def ask(question: str, thread_id: str = "user-1") -> str:
 
     config = {"configurable": {"thread_id": thread_id}, "recursion_limit": 8}
 
+    # RELIABILITY: any call to an external API (the LLM) can occasionally
+    # fail for reasons outside our control -- e.g. the model generating a
+    # malformed/incomplete tool call, a network hiccup, a rate limit, etc.
+    # We try once, and if it fails, try ONE more time (a fresh attempt
+    # often succeeds, since these are usually one-off generation glitches,
+    # not a permanent problem). If it fails twice, we return a clear,
+    # honest message instead of crashing the whole program.
     last_error = None
     for attempt in range(2):
         try:
