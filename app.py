@@ -2,16 +2,7 @@
 import uuid
 import streamlit as st
 
-# ---------------------------------------------------------------------------
-# VISUAL IDENTITY
-# Grounded in the actual subject (an airline assistant), not a generic
-# template: clean white/sky background, amber runway-light accent, deep
-# navy for text, teal for confirmations/links. Space Grotesk for headings
-# (geometric, aviation/tech feel), Inter for body text, IBM Plex Mono for
-# flight-data-style detail. The signature element is the thin amber
-# "runway lights" bar under the header -- one deliberate visual moment,
-# kept restrained everywhere else.
-# ---------------------------------------------------------------------------
+
 st.set_page_config(page_title="Skypath", page_icon="✈️", layout="centered")
 
 st.markdown("""
@@ -110,30 +101,16 @@ h1 {
 </style>
 """, unsafe_allow_html=True)
 
-# Show something on screen IMMEDIATELY, before the heavy import below --
-# otherwise the browser shows a blank page for up to a minute while the
-# RAG setup (downloading the embedding model, building the FAISS index)
-# runs in the background with zero visual feedback.
 st.title("✈️ Skypath — Flight Assistant")
 
 
-# This import runs step8_full_assistant.py's setup code ONCE (building the
-# RAG index, the agent, etc.) -- Python caches imported modules, so even
-# though Streamlit re-runs this app.py file on every interaction, the
-# heavy one-time setup inside step8_full_assistant.py does NOT re-run
-# every time. Only the code below this import re-runs per interaction.
-# The spinner gives you visible proof it's working, not stuck/broken.
+
 with st.spinner("Loading Skypath (first run can take up to a minute -- "
                  "downloading the embedding model, building the search index)..."):
     from step8_full_assistant import ask
 
-# ---------------------------------------------------------------------------
-# Session state: Streamlit re-runs this whole script on every message, so
-# anything we want to PERSIST across messages (the visible chat history,
-# and a stable conversation ID for memory) must be stored in
-# st.session_state -- a dictionary that survives across re-runs for as
-# long as the browser tab/session stays open.
-# ---------------------------------------------------------------------------
+
+
 if "thread_id" not in st.session_state:
     # A unique ID per browser session -- this is what our checkpointer
     # (Step 5) uses to keep each user's conversation memory separate.
@@ -143,22 +120,12 @@ if "messages" not in st.session_state:
     st.session_state.messages = []
 
 
-# ---------------------------------------------------------------------------
-# Redraw the ENTIRE chat history on every re-run. Streamlit doesn't
-# remember what was on screen -- it just remembers st.session_state, so we
-# manually redraw every past message each time the script re-runs.
-# ---------------------------------------------------------------------------
 for msg in st.session_state.messages:
     avatar = "✈️" if msg["role"] == "assistant" else "🧳"
     with st.chat_message(msg["role"], avatar=avatar):
         st.markdown(msg["content"])
 
 
-# ---------------------------------------------------------------------------
-# The actual input box. st.chat_input() returns the typed text (or None
-# if nothing was just submitted) -- this line only becomes truthy the
-# instant the user hits enter.
-# ---------------------------------------------------------------------------
 user_input = st.chat_input("Ask about a flight, or an airline policy...")
 
 if user_input:
